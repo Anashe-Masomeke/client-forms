@@ -19,7 +19,7 @@ Build EXE:
 # ════════════════════════════════════════════════════════════════════════════
 import sys, os, subprocess, urllib.request, threading
 
-VERSION       = 10                         # ← bump this each release, then rebuild EXE
+VERSION       = 11                        # ← bump this each release, then rebuild EXE
 GITHUB_USER   = "Anashe-Masomeke"
 GITHUB_REPO   = "client-forms"           # ← matches github.com/Anashe-Masomeke/client-forms
 GITHUB_BRANCH = "main"
@@ -65,10 +65,11 @@ def check_and_apply_update():
     # ── File paths ──────────────────────────────────────────────────────────
     current_exe  = os.path.abspath(sys.argv[0])
     exe_dir      = os.path.dirname(current_exe)
-    # Save to TEMP — always writable, avoids Permission Denied on Downloads
-    tmp_dir      = os.environ.get("TEMP", os.environ.get("TMP", exe_dir))
-    new_exe_path = os.path.join(tmp_dir, f"FBC-Client-Forms-v{rv}.exe")
-    bat_path     = os.path.join(tmp_dir, "_fbc_cf_updater.bat")
+    # Save to Downloads folder, fall back to TEMP if unavailable
+    downloads    = os.path.join(os.path.expanduser("~"), "Downloads")
+    save_dir     = downloads if os.path.isdir(downloads) else os.environ.get("TEMP", exe_dir)
+    new_exe_path = os.path.join(save_dir, f"FBC-Client-Forms-v{rv}.exe")
+    bat_path     = os.path.join(save_dir, "_fbc_cf_updater.bat")
 
     # ── Progress window ─────────────────────────────────────────────────────
     prog = tk.Tk()
