@@ -19,7 +19,7 @@ Build EXE:
 # ════════════════════════════════════════════════════════════════════════════
 import sys, os, subprocess, urllib.request, threading
 
-VERSION       = 5                         # ← bump this each release, then rebuild EXE
+VERSION       = 6                         # ← bump this each release, then rebuild EXE
 GITHUB_USER   = "Anashe-Masomeke"
 GITHUB_REPO   = "fbc-client-forms"
 GITHUB_BRANCH = "main"
