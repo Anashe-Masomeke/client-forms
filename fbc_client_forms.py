@@ -11,7 +11,7 @@ Requirements:
     pip install google-auth google-auth-httplib2 google-api-python-client --trusted-host pypi.org --trusted-host files.pythonhosted.org --trusted-host pypi.python.org
 
 Build EXE:
-    pyinstaller --onefile --windowed --name "FBC-Client-Forms" fbc_client_forms.py
+    pyinstaller --onefile --windowed --name "FBC-Client-Forms" --clean fbc_client_forms.py
 """
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -19,7 +19,7 @@ Build EXE:
 # ════════════════════════════════════════════════════════════════════════════
 import sys, os, subprocess, urllib.request, threading
 
-VERSION       = 7                         # ← bump this each release, then rebuild EXE
+VERSION       = 9                        # ← bump this each release, then rebuild EXE
 GITHUB_USER   = "Anashe-Masomeke"
 GITHUB_REPO   = "client-forms"           # ← matches github.com/Anashe-Masomeke/client-forms
 GITHUB_BRANCH = "main"
@@ -65,8 +65,10 @@ def check_and_apply_update():
     # ── File paths ──────────────────────────────────────────────────────────
     current_exe  = os.path.abspath(sys.argv[0])
     exe_dir      = os.path.dirname(current_exe)
-    new_exe_path = os.path.join(exe_dir, f"FBC-Client-Forms-v{rv}.exe")
-    bat_path     = os.path.join(exe_dir, "_fbc_cf_updater.bat")
+    # Save to TEMP — always writable, avoids Permission Denied on Downloads
+    tmp_dir      = os.environ.get("TEMP", os.environ.get("TMP", exe_dir))
+    new_exe_path = os.path.join(tmp_dir, f"FBC-Client-Forms-v{rv}.exe")
+    bat_path     = os.path.join(tmp_dir, "_fbc_cf_updater.bat")
 
     # ── Progress window ─────────────────────────────────────────────────────
     prog = tk.Tk()
@@ -115,7 +117,7 @@ def check_and_apply_update():
             # Write launcher bat: waits for old process to close, starts new EXE, self-deletes
             bat_lines = [
                 "@echo off",
-                "ping 127.0.0.1 -n 4 > nul",
+                "ping 127.0.0.1 -n 6 > nul",  # wait ~5s for old process to fully exit
                 f'start "" "{new_exe_path}"',
                 "ping 127.0.0.1 -n 2 > nul",
                 'del "%~f0"',
