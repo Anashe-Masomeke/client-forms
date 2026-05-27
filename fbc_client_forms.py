@@ -19,9 +19,9 @@ Build EXE:
 # ════════════════════════════════════════════════════════════════════════════
 import sys, os, subprocess, urllib.request, threading
 
-VERSION       = 6                         # ← bump this each release, then rebuild EXE
+VERSION       = 7                         # ← bump this each release, then rebuild EXE
 GITHUB_USER   = "Anashe-Masomeke"
-GITHUB_REPO   = "fbc-client-forms"
+GITHUB_REPO   = "client-forms"           # ← matches github.com/Anashe-Masomeke/client-forms
 GITHUB_BRANCH = "main"
 EXE_NAME      = "FBC-Client-Forms.exe"   # ← must match the asset name in the GitHub Release exactly
 
