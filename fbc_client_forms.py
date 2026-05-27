@@ -17,87 +17,155 @@ Build EXE:
 # ════════════════════════════════════════════════════════════════════════════
 #  AUTO-UPDATE
 # ════════════════════════════════════════════════════════════════════════════
-import sys, os, subprocess, urllib.request
+import sys, os, subprocess, urllib.request, threading
 
-VERSION       = 4
+VERSION       = 5                         # ← bump this each release, then rebuild EXE
 GITHUB_USER   = "Anashe-Masomeke"
 GITHUB_REPO   = "fbc-client-forms"
 GITHUB_BRANCH = "main"
-EXE_NAME      = "FBC-Client-Forms.exe"
+EXE_NAME      = "FBC-Client-Forms.exe"   # ← must match the asset name in the GitHub Release exactly
 
 _EXE = f"https://github.com/{GITHUB_USER}/{GITHUB_REPO}/releases/latest/download/{EXE_NAME}"
 _VER = (f"https://raw.githubusercontent.com/"
         f"{GITHUB_USER}/{GITHUB_REPO}/{GITHUB_BRANCH}/version.txt")
 
+
 def _remote_ver():
+    """Fetch the plain-integer version from version.txt on GitHub main branch.
+    Returns -1 if the file is missing, unreachable, or not a valid integer."""
     try:
-        with urllib.request.urlopen(_VER, timeout=4) as r:
+        with urllib.request.urlopen(_VER, timeout=6) as r:
             return int(r.read().decode().strip())
     except Exception:
         return -1
 
+
 def check_and_apply_update():
     rv = _remote_ver()
     if rv <= VERSION:
-        return
+        return   # already up-to-date, or couldn't reach GitHub — silent skip
+
     import tkinter as tk
-    from tkinter import messagebox
-    root = tk.Tk(); root.withdraw()
+    from tkinter import messagebox, ttk
+
+    # ── Ask the user ────────────────────────────────────────────────────────
+    root = tk.Tk()
+    root.withdraw()
     ok = messagebox.askyesno(
         "FBC Client Forms — Update Available",
-        f"New version available (v{rv}).\nYour version: v{VERSION}\n\nDownload and install now?",
+        f"A new version is available  (v{rv}).\n"
+        f"Your version: v{VERSION}\n\n"
+        "Download and install now?\n\n"
+        "(The new version will open automatically when the download finishes.)",
         icon="info")
     root.destroy()
     if not ok:
         return
 
+    # ── File paths ──────────────────────────────────────────────────────────
     current_exe  = os.path.abspath(sys.argv[0])
     exe_dir      = os.path.dirname(current_exe)
     new_exe_path = os.path.join(exe_dir, f"FBC-Client-Forms-v{rv}.exe")
     bat_path     = os.path.join(exe_dir, "_fbc_cf_updater.bat")
 
-    root2 = tk.Tk(); root2.withdraw()
-    from tkinter import messagebox as mb
-    mb.showinfo("Downloading", f"Downloading v{rv} — please wait.", parent=root2)
-    root2.destroy()
+    # ── Progress window ─────────────────────────────────────────────────────
+    prog = tk.Tk()
+    prog.title("Downloading Update…")
+    prog.resizable(False, False)
+    prog.attributes("-topmost", True)
+    w, h = 420, 115
+    prog.geometry(
+        f"{w}x{h}+{(prog.winfo_screenwidth()-w)//2}+{(prog.winfo_screenheight()-h)//2}")
 
-    try:
-        with urllib.request.urlopen(_EXE, timeout=180) as resp:
-            with open(new_exe_path, "wb") as f:
-                while True:
-                    chunk = resp.read(65536)
-                    if not chunk: break
-                    f.write(chunk)
+    tk.Label(prog, text=f"Downloading FBC Client Forms v{rv}…",
+             font=("Segoe UI", 10, "bold"), pady=12).pack()
+    bar = ttk.Progressbar(prog, mode="indeterminate", length=360)
+    bar.pack(padx=30)
+    bar.start(12)
+    lbl_kb = tk.Label(prog, text="Starting…", font=("Segoe UI", 8), fg="#607080")
+    lbl_kb.pack(pady=6)
+    prog.update()
 
-        if os.path.getsize(new_exe_path) < 5 * 1024 * 1024:
-            os.remove(new_exe_path)
-            raise Exception("Download incomplete — please try again.")
+    error_holder = [None]
 
-        with open(bat_path, "w") as f:
-            f.write("\n".join([
+    def _do_download():
+        try:
+            MIN_SIZE = 5 * 1024 * 1024   # 5 MB — adjust if your EXE grows larger
+            downloaded = 0
+            with urllib.request.urlopen(_EXE, timeout=180) as resp:
+                with open(new_exe_path, "wb") as f:
+                    while True:
+                        chunk = resp.read(65536)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        try:
+                            lbl_kb.config(text=f"Downloaded: {downloaded // 1024:,} KB")
+                        except Exception:
+                            pass
+
+            size = os.path.getsize(new_exe_path)
+            if size < MIN_SIZE:
+                os.remove(new_exe_path)
+                raise Exception(
+                    f"Download seems incomplete ({size // 1024} KB).\n"
+                    "Please check your internet connection and try again.")
+
+            # Write launcher bat: waits for old process to close, starts new EXE, self-deletes
+            bat_lines = [
                 "@echo off",
                 "ping 127.0.0.1 -n 4 > nul",
                 f'start "" "{new_exe_path}"',
+                "ping 127.0.0.1 -n 2 > nul",
                 'del "%~f0"',
-            ]))
-        subprocess.Popen(["cmd.exe", "/c", bat_path],
-                         creationflags=subprocess.CREATE_NO_WINDOW)
-        sys.exit(0)
-    except Exception as e:
-        for fp in [new_exe_path, bat_path]:
-            try: os.remove(fp)
-            except: pass
-        root3 = tk.Tk(); root3.withdraw()
-        from tkinter import messagebox as mb2
-        mb2.showerror("Update Failed", str(e))
-        root3.destroy()
+            ]
+            with open(bat_path, "w") as f:
+                f.write("\n".join(bat_lines) + "\n")
+
+        except Exception as e:
+            error_holder[0] = str(e)
+            for fp in [new_exe_path, bat_path]:
+                try:
+                    os.remove(fp)
+                except Exception:
+                    pass
+        finally:
+            try:
+                prog.after(0, prog.quit)
+            except Exception:
+                pass
+
+    t = threading.Thread(target=_do_download, daemon=True)
+    t.start()
+    prog.mainloop()   # blocks here until download thread calls prog.quit()
+    prog.destroy()
+    t.join()
+
+    # ── Handle result ────────────────────────────────────────────────────────
+    if error_holder[0]:
+        err_root = tk.Tk()
+        err_root.withdraw()
+        messagebox.showerror(
+            "Update Failed",
+            f"Could not update:\n\n{error_holder[0]}\n\n"
+            "Please download manually from:\n"
+            f"github.com/{GITHUB_USER}/{GITHUB_REPO}/releases/latest")
+        err_root.destroy()
+        return   # continue launching the current (old) version
+
+    # ── Launch new EXE via bat and exit current process ──────────────────────
+    subprocess.Popen(
+        ["cmd.exe", "/c", bat_path],
+        creationflags=subprocess.CREATE_NO_WINDOW,
+        close_fds=True)
+    sys.exit(0)
 
 
 # ════════════════════════════════════════════════════════════════════════════
 #  IMPORTS
 # ════════════════════════════════════════════════════════════════════════════
 import json
-import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from datetime import datetime, date
