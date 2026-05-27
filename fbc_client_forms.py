@@ -697,9 +697,12 @@ class LoginDialog(tk.Tk):
         self._settings     = load_settings()
         self._build()
         self.update_idletasks()
-        w, h = 400, 440
-        x = (self.winfo_screenwidth()  - w) // 2
-        y = (self.winfo_screenheight() - h) // 2
+        # Auto-fit height to content; cap at 90% of screen so it always fits
+        w  = 400
+        sh = self.winfo_screenheight()
+        h  = min(self.winfo_reqheight() + 20, int(sh * 0.90))
+        x  = (self.winfo_screenwidth() - w) // 2
+        y  = max(20, (sh - h) // 2)
         self.geometry(f"{w}x{h}+{x}+{y}")
         self.protocol("WM_DELETE_WINDOW", self._close)
 
@@ -789,8 +792,9 @@ class LoginDialog(tk.Tk):
         tk.Label(body, text=sync_txt, bg=SIDEBAR_BG, fg=sync_clr,
                  font=("Segoe UI", 8)).pack(anchor="w", pady=(16, 0))
 
-        tk.Label(self, text=f"v{VERSION}", bg=SIDEBAR_BG, fg="#2A4A6A",
-                 font=("Segoe UI", 8)).pack(side="bottom", pady=6)
+        # version shown inside body (below sync label) — never clipped
+        tk.Label(body, text=f"v{VERSION}", bg=SIDEBAR_BG, fg="#2A4A6A",
+                 font=("Segoe UI", 8)).pack(anchor="w", pady=(4, 0))
 
     def _toggle(self):
         self._show = not self._show
