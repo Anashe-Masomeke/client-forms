@@ -19,7 +19,7 @@ Build EXE:
 # ════════════════════════════════════════════════════════════════════════════
 import sys, os, subprocess, urllib.request
 
-VERSION       = 3
+VERSION       = 4
 GITHUB_USER   = "Anashe-Masomeke"
 GITHUB_REPO   = "fbc-client-forms"
 GITHUB_BRANCH = "main"
@@ -122,7 +122,7 @@ SIDEBAR_TEXT    = "#B0C8E8"
 # ════════════════════════════════════════════════════════════════════════════
 #  CONSTANTS
 # ════════════════════════════════════════════════════════════════════════════
-APP_PASSWORD      = "fbc"
+APP_PASSWORD      = "anesu"
 MAX_ATTEMPTS      = 6
 
 DEFAULT_VFEX_FORM = ""
