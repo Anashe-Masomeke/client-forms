@@ -19,7 +19,7 @@ Build EXE:
 # ════════════════════════════════════════════════════════════════════════════
 import sys, os, subprocess, urllib.request, threading
 
-VERSION       = 11                        # ← bump this each release, then rebuild EXE
+VERSION       = 12                    # ← bump this each release, then rebuild EXE
 GITHUB_USER   = "Anashe-Masomeke"
 GITHUB_REPO   = "client-forms"           # ← matches github.com/Anashe-Masomeke/client-forms
 GITHUB_BRANCH = "main"
