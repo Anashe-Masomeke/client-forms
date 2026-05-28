@@ -21,7 +21,7 @@ import os, sys, warnings
 # ════════════════════════════════════════════════════════════════════════════
 import subprocess, urllib.request, threading
 
-VERSION       = 15
+VERSION       = 16
 GITHUB_USER   = "Anashe-Masomeke"
 GITHUB_REPO   = "client-forms"
 GITHUB_BRANCH = "main"
