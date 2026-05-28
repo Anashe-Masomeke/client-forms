@@ -14,26 +14,7 @@ Build EXE:
     pyinstaller --onefile --windowed --name "FBC-Client-Forms" --clean fbc_client_forms.py
 """
 
-# ════════════════════════════════════════════════════════════════════════════
-#  SSL / PROXY KILL-SWITCH  (must be first, before any network import)
-# ════════════════════════════════════════════════════════════════════════════
 import os, sys, warnings
-
-# Suppress ALL SSL warnings globally
-os.environ["GRPC_DEFAULT_SSL_ROOTS_FILE_PATH"] = ""
-os.environ["REQUESTS_CA_BUNDLE"]               = ""
-os.environ["CURL_CA_BUNDLE"]                   = ""
-os.environ["SSL_CERT_FILE"]                    = ""
-os.environ["NO_PROXY"]                         = "*"
-for _v in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]:
-    os.environ.pop(_v, None)
-
-import ssl
-ssl._create_default_https_context = ssl._create_unverified_context
-
-import urllib3
-urllib3.disable_warnings()
-warnings.filterwarnings("ignore")
 
 import httplib2
 httplib2.debuglevel = 0
@@ -43,7 +24,7 @@ httplib2.debuglevel = 0
 # ════════════════════════════════════════════════════════════════════════════
 import subprocess, urllib.request, threading
 
-VERSION       = 13
+VERSION       = 14
 GITHUB_USER   = "Anashe-Masomeke"
 GITHUB_REPO   = "client-forms"
 GITHUB_BRANCH = "main"
@@ -245,56 +226,9 @@ def save_settings(s):
 
 
 # ════════════════════════════════════════════════════════════════════════════
-#  GOOGLE SHEETS BACKEND  — pure requests, no httplib2 for API calls
+#  GOOGLE SHEETS BACKEND  — gspread (same as fbc_suite, proven on office network)
 # ════════════════════════════════════════════════════════════════════════════
-SHEETS_BASE = "https://sheets.googleapis.com/v4/spreadsheets"
 
-import requests as _req
-
-
-def _make_session(creds):
-    """Return a requests.Session with the bearer token baked in, SSL verify off."""
-    s = _req.Session()
-    s.verify    = False
-    s.trust_env = False   # ignore system proxy / env vars
-    s.headers.update({
-        "Authorization": f"Bearer {creds.token}",
-        "Content-Type":  "application/json",
-    })
-    return s
-
-
-def _refresh_creds(key_file_path):
-    """Load service-account creds and refresh the token via requests (SSL off)."""
-    from google.oauth2 import service_account
-    from google.auth.transport.requests import Request as GRequest
-
-    SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
-    creds  = service_account.Credentials.from_service_account_file(
-        key_file_path, scopes=SCOPES)
-
-    tmp = _req.Session()
-    tmp.verify    = False
-    tmp.trust_env = False
-    creds.refresh(GRequest(session=tmp))
-    return creds
-
-
-def _sheets_request(method, sess, creds, key_file_path, url, **kwargs):
-    """Make a Sheets API call; refresh token on 401 and retry once."""
-    from google.auth.transport.requests import Request as GRequest
-
-    r = getattr(sess, method)(url, **kwargs)
-    if r.status_code == 401:
-        # Token expired — refresh and retry
-        tmp = _req.Session(); tmp.verify = False; tmp.trust_env = False
-        creds.refresh(GRequest(session=tmp))
-        sess.headers["Authorization"] = f"Bearer {creds.token}"
-        r = getattr(sess, method)(url, **kwargs)
-    return r
-
-
-# ── Row converters ────────────────────────────────────────────────────────
 def _row_to_client(row):
     def g(i, default=""):
         return row[i] if i < len(row) else default
@@ -328,91 +262,73 @@ def _client_to_row(c):
     ]
 
 
+def _open_worksheet(key_file, sheet_id):
+    """Open the FBC_Clients worksheet using gspread. Creates tab if missing."""
+    import gspread
+    from google.oauth2.service_account import Credentials
+    SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+    creds  = Credentials.from_service_account_file(key_file, scopes=SCOPES)
+    gc     = gspread.authorize(creds)
+    sh     = gc.open_by_key(sheet_id)
+    try:
+        ws = sh.worksheet(SHEET_NAME)
+    except gspread.exceptions.WorksheetNotFound:
+        ws = sh.add_worksheet(title=SHEET_NAME, rows=1000, cols=11)
+        ws.append_row(COL_HEADERS)
+    # Ensure header row is correct
+    existing = ws.row_values(1)
+    if existing != COL_HEADERS:
+        ws.insert_row(COL_HEADERS, 1)
+    return ws
+
+
+def test_sheets_connection(key_file, sheet_id):
+    """Returns (ok:bool, error_msg:str). Used by setup dialog."""
+    try:
+        _open_worksheet(key_file, sheet_id)
+        return True, ""
+    except Exception as e:
+        return False, str(e)
+
+
 class SheetsDB:
     """
-    Thin wrapper around the Google Sheets REST API using plain requests.
+    Wrapper around gspread — same library that works in fbc_suite on the office network.
     Falls back to local JSON cache when offline.
     """
     def __init__(self, key_file, sheet_id):
         self.key_file  = key_file
         self.sheet_id  = sheet_id
         self._online   = False
-        self._sess     = None
-        self._creds    = None
+        self._ws       = None
         self._connect()
 
-    # ── internal helpers ──────────────────────────────────────────────────
     def _connect(self):
         try:
-            self._creds = _refresh_creds(self.key_file)
-            self._sess  = _make_session(self._creds)
-            self._ensure_header()
+            self._ws     = _open_worksheet(self.key_file, self.sheet_id)
             self._online = True
-            print("[SheetsDB] Connected OK")
+            print("[SheetsDB] Connected OK via gspread")
         except Exception as e:
             self._online = False
             print(f"[SheetsDB] Offline — {e}")
 
-    def _url(self, path=""):
-        return f"{SHEETS_BASE}/{self.sheet_id}{path}"
+    def _reconnect_if_needed(self):
+        """Try to reconnect if we went offline."""
+        if not self._online:
+            self._connect()
 
-    def _get(self, path, params=None):
-        return _sheets_request("get",  self._sess, self._creds,
-                               self.key_file, self._url(path), params=params)
-
-    def _put(self, path, body, params=None):
-        return _sheets_request("put",  self._sess, self._creds,
-                               self.key_file, self._url(path),
-                               json=body, params=params)
-
-    def _post(self, path, body, params=None):
-        return _sheets_request("post", self._sess, self._creds,
-                               self.key_file, self._url(path),
-                               json=body, params=params)
-
-    def _ensure_header(self):
-        r    = self._get(f"/values/{SHEET_NAME}!A1:K1")
-        data = r.json()
-        # If the tab doesn't exist yet the API returns an error
-        if not r.ok:
-            err = data.get("error", {}).get("message", "")
-            if "Unable to parse range" in err or "not found" in err.lower():
-                self._post(":batchUpdate", body={"requests": [
-                    {"addSheet": {"properties": {"title": SHEET_NAME}}}]})
-            # Write header regardless
-            self._put(f"/values/{SHEET_NAME}!A1",
-                      body={"values": [COL_HEADERS]},
-                      params={"valueInputOption": "RAW"})
-            return
-        vals = data.get("values", [])
-        if not vals or vals[0] != COL_HEADERS:
-            self._put(f"/values/{SHEET_NAME}!A1",
-                      body={"values": [COL_HEADERS]},
-                      params={"valueInputOption": "RAW"})
-
-    def _find_row_num(self, client_id):
-        """Return 1-based row number for client_id, or None."""
-        try:
-            r   = self._get(f"/values/{SHEET_NAME}!A:A")
-            col = r.json().get("values", [])
-            for i, cell in enumerate(col):
-                if cell and cell[0] == client_id:
-                    return i + 1
-        except Exception:
-            pass
-        return None
-
-    # ── public API ────────────────────────────────────────────────────────
     @property
     def online(self):
         return self._online
 
     def read_all(self):
+        self._reconnect_if_needed()
         if self._online:
             try:
-                r    = self._get(f"/values/{SHEET_NAME}!A2:K")
-                rows = r.json().get("values", [])
-                clients = [_row_to_client(row) for row in rows if row and row[0]]
+                all_rows = self._ws.get_all_values()
+                # Skip header row
+                data_rows = all_rows[1:] if len(all_rows) > 1 else []
+                clients   = [_row_to_client(r) for r in data_rows if r and r[0]]
                 with open(STATE_FILE, "w") as f:
                     json.dump(clients, f, indent=2)
                 return clients
@@ -425,76 +341,56 @@ class SheetsDB:
         except Exception:
             return []
 
+    def _find_row_num(self, client_id):
+        """Return 1-based sheet row number for client_id, or None."""
+        try:
+            col = self._ws.col_values(1)   # column A
+            for i, val in enumerate(col):
+                if val == client_id:
+                    return i + 1
+        except Exception:
+            pass
+        return None
+
     def append_client(self, client):
+        self._reconnect_if_needed()
         if self._online:
             try:
-                r = self._post(
-                    f"/values/{SHEET_NAME}!A1:append",
-                    body={"values": [_client_to_row(client)]},
-                    params={"valueInputOption": "RAW",
-                            "insertDataOption": "INSERT_ROWS"})
-                return r.ok
+                self._ws.append_row(_client_to_row(client),
+                                    value_input_option="RAW")
+                return True
             except Exception as e:
                 print(f"[SheetsDB] append failed: {e}")
                 self._online = False
         return False
 
     def update_client(self, client):
+        self._reconnect_if_needed()
         if self._online:
             try:
                 row_num = self._find_row_num(client["id"])
                 if row_num:
-                    r = self._put(
-                        f"/values/{SHEET_NAME}!A{row_num}:K{row_num}",
-                        body={"values": [_client_to_row(client)]},
-                        params={"valueInputOption": "RAW"})
-                    return r.ok
+                    self._ws.update(f"A{row_num}:K{row_num}",
+                                    [_client_to_row(client)],
+                                    value_input_option="RAW")
+                    return True
             except Exception as e:
                 print(f"[SheetsDB] update failed: {e}")
                 self._online = False
         return False
 
     def delete_client(self, client_id):
+        self._reconnect_if_needed()
         if self._online:
             try:
                 row_num = self._find_row_num(client_id)
                 if row_num:
-                    r    = self._get("")       # get spreadsheet metadata
-                    meta = r.json()
-                    gid  = None
-                    for s in meta.get("sheets", []):
-                        if s["properties"]["title"] == SHEET_NAME:
-                            gid = s["properties"]["sheetId"]
-                            break
-                    if gid is not None:
-                        r = self._post(":batchUpdate", body={"requests": [{
-                            "deleteDimension": {"range": {
-                                "sheetId":    gid,
-                                "dimension":  "ROWS",
-                                "startIndex": row_num - 1,
-                                "endIndex":   row_num,
-                            }}
-                        }]})
-                        return r.ok
+                    self._ws.delete_rows(row_num)
+                    return True
             except Exception as e:
                 print(f"[SheetsDB] delete failed: {e}")
                 self._online = False
         return False
-
-
-# ── test connection (used by setup dialog) ────────────────────────────────
-def test_sheets_connection(key_file, sheet_id):
-    """Returns (ok:bool, error_msg:str)."""
-    try:
-        creds = _refresh_creds(key_file)
-        sess  = _make_session(creds)
-        url   = f"{SHEETS_BASE}/{sheet_id}/values/{SHEET_NAME}!A1:K1"
-        r     = sess.get(url)
-        if r.status_code in (200, 400):   # 400 = tab missing, still reachable
-            return True, ""
-        return False, f"HTTP {r.status_code}: {r.text[:200]}"
-    except Exception as e:
-        return False, str(e)
 
 
 # ════════════════════════════════════════════════════════════════════════════
