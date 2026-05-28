@@ -16,15 +16,12 @@ Build EXE:
 
 import os, sys, warnings
 
-import httplib2
-httplib2.debuglevel = 0
-
 # ════════════════════════════════════════════════════════════════════════════
 #  AUTO-UPDATE
 # ════════════════════════════════════════════════════════════════════════════
 import subprocess, urllib.request, threading
 
-VERSION       = 14
+VERSION       = 15
 GITHUB_USER   = "Anashe-Masomeke"
 GITHUB_REPO   = "client-forms"
 GITHUB_BRANCH = "main"
